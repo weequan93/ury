@@ -17,12 +17,17 @@ export async function printOrder({ orderId, posProfile }: PrintOrderParams): Pro
 
   if (print_type === 'qz') {
     if (!qz_host) {
-      throw new Error('QZ host is not set');
+      // Graceful fallback: open the print view in a new tab, similar to socket flow
+      const url = `/printview?doctype=POS Invoice&name=${orderId}&format=${print_format}&no_letterhead=1&settings={}&letterhead=No Letterhead&trigger_print=1&_lang=en`;
+      window.open(url, '_blank', 'noopener,noreferrer');
+      await updatePrintStatus(orderId);
+      return 'socket';
+    } else {
+      const html = await getInvoicePrintHtml(orderId, print_format as string);
+      await printWithQz(qz_host, html);
+      await updatePrintStatus(orderId);
+      return 'qz';
     }
-    const html = await getInvoicePrintHtml(orderId, print_format as string);
-    await printWithQz(qz_host, html);
-    await updatePrintStatus(orderId);
-    return 'qz';
   } else if (print_type === 'network') {
     if (cashier && !multiple_cashier) {
       await networkPrint(orderId, printer as string, print_format as string);
