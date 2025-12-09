@@ -242,7 +242,10 @@ async function initializeSocket() {
     await fetchAndSetSiteName();
     if (window.globalSiteName) {
         let site = window.globalSiteName;
+        // Replace the port in the origin URL to match the Socket.IO port (default 9000)
+        let url = window.location.origin.replace(':8000', ':9000');
         let site_url = `${url}/${site}`;
+        
         socket = io(site_url,{ withCredentials: true });
         console.log("socket == >",socket)
         socket.on('connect_error', (err) => {
