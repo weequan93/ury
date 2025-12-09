@@ -307,6 +307,7 @@ export const useTableStore = defineStore("table", {
       let items = this.tableMenu;
       items.forEach((item) => {
         item.qty = "";
+        item.comment = "";
       });
       let cart = this.menu.cart;
       cart.splice(0, cart.length);
@@ -364,39 +365,29 @@ export const useTableStore = defineStore("table", {
             this.customers.newCustomerMobileNo=""
           }
 
+          // Populate cart with all previous items (no merging) so identical items stay separate
+          const cartRows = [];
+          const qtyByItem = {};
+          (this.previousOrderdItem || []).forEach((row) => {
+            const entry = {
+              item: row.item_code,
+              item_name: row.item_name,
+              rate: row.rate,
+              qty: Number(row.qty) || 0,
+              comment: row.comment,
+            };
+            cartRows.push(entry);
+            qtyByItem[entry.item] = (qtyByItem[entry.item] || 0) + entry.qty;
+          });
+
+          // Reflect total qty on menu items for display, but keep cart rows unmerged
           items.forEach((item) => {
-            const previousItem =
-              this.previousOrderdItem &&
-              this.previousOrderdItem.find(
-                (previousItem) => previousItem.item_code === item.item
-              );
-            if (previousItem && !item.qty) {
-              const itemIndex = cart.findIndex((obj) => obj.item === item.item);
-              const itemIndexExists = itemIndex !== -1;
-              if (!itemIndexExists) {
-                item.qty = previousItem.qty;
-                item.comment = previousItem.comment;
-                cart.push(item);
-              }
+            if (qtyByItem[item.item]) {
+              item.qty = qtyByItem[item.item];
             }
           });
-          if (this.previousOrderdItem && this.previousOrderdItem.length > 0) {
-            this.previousOrderdItem.forEach((previousItem) => {
-              const existsInMenu = items.some(item => item.item === previousItem.item_code);
-              const existsInCart = cart.some(item => item.item === previousItem.item_code);
-              
-              if (!existsInMenu && !existsInCart) {
-                // Item no longer in menu but was in previous order - add it to cart
-                cart.push({
-                  item: previousItem.item_code,
-                  item_name: previousItem.item_name,
-                  rate: previousItem.rate,
-                  qty: previousItem.qty,
-                  comment: previousItem.comment
-                });
-              }
-            });
-          }
+
+          cart.splice(0, cart.length, ...cartRows);
         })
         .catch((error) => console.error(error));
     },
