@@ -11,10 +11,54 @@ from ury.ury.api.ury_kot_generate import kot_execute
 from ury.ury.api.ury_kot_generate import process_items_for_cancel_kot
 
 from frappe import cache
+from frappe import _
 
 
 class URYOrder(Document):
-    pass
+	pass
+
+
+def _validate_order_context(customer, pos_profile, table, items):
+	"""Early validation used during sync_order before invoice creation."""
+	if not customer:
+		frappe.throw(_("Please enter valid customer details"))
+	if not pos_profile or not frappe.db.exists("POS Profile", pos_profile):
+		frappe.throw(_("Invalid POS Profile"))
+	if not table or not frappe.db.exists("URY Table", table):
+		frappe.throw(_("Table is required and must exist"))
+	if not items:
+		frappe.throw(_("No items in order"))
+	# basic shape check on items to fail fast
+	for it in items or []:
+		code = it.get("item") or it.get("item_code")
+		if not code:
+			frappe.throw(_("Item code is required for all rows"))
+		qty = it.get("qty") or it.get("quantity")
+		if qty is None:
+			frappe.throw(_("Quantity is required for item {0}").format(code))
+		try:
+			if float(qty) <= 0:
+				frappe.throw(_("Quantity must be greater than zero for item {0}").format(code))
+		except Exception:
+			frappe.throw(_("Invalid quantity for item {0}").format(code))
+
+
+def _check_stock(items, warehouse):
+	"""Ensure requested qty is available in the given warehouse. Skip if warehouse is not set."""
+	if not warehouse:
+		return
+	for it in items or []:
+		code = it.get("item") or it.get("item_code")
+		qty = it.get("qty") or it.get("quantity") or 0
+		try:
+			qty = float(qty)
+		except Exception:
+			qty = 0
+		if not code or qty <= 0:
+			continue
+		actual_qty = frappe.db.get_value("Bin", {"item_code": code, "warehouse": warehouse}, "actual_qty") or 0
+		if qty > float(actual_qty):
+			frappe.throw(_("Insufficient stock for item {0} in warehouse {1} (Requested: {2}, Available: {3})").format(code, warehouse, qty, actual_qty))
 
 
 @frappe.whitelist()
@@ -132,10 +176,13 @@ def sync_order(
     
     user_role = frappe.get_roles()
     posprofile = frappe.get_doc("POS Profile", pos_profile)
-    
+
     billing_user = any(
         role.role in user_role for role in posprofile.role_allowed_for_billing
     )
+
+    # Early validation before building invoice
+    _validate_order_context(customer, pos_profile, table, items)
 
     # Check if the last invoice was already billed
     if (
@@ -246,6 +293,11 @@ def sync_order(
     # - 'ury_pos': Already formatted list, hence using else
     if isinstance(items, str):
         items = json.loads(items)
+
+    # Stock check using POS Profile warehouse (fallback to branch warehouse) if configured
+    warehouse = posprofile.warehouse or frappe.db.get_value("Branch", invoice.branch, "warehouse")
+    _check_stock(items, warehouse)
+
     invoice.items = []
     
     menu = frappe.db.get_value("URY Menu", {"branch": invoice.branch}, "name")
@@ -264,6 +316,9 @@ def sync_order(
             frappe.throw(_("No item price found for Item: {0} in Price List: {1}. Please check the price list settings.").format(d.get("item"), price_list))
 
         else:
+            qty = d.get("qty")
+            if qty is None or float(qty) <= 0:
+                frappe.throw(_("Quantity must be greater than zero for Item: {0}").format(d.get("item")))
             invoice.append(
                 "items",
                 dict(
