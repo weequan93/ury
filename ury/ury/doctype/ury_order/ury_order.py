@@ -295,8 +295,15 @@ def sync_order(
         items = json.loads(items)
 
     # Stock check using POS Profile warehouse (fallback to branch warehouse) if configured
-    warehouse = posprofile.warehouse or frappe.db.get_value("Branch", invoice.branch, "warehouse")
-    _check_stock(items, warehouse)
+    warehouse = posprofile.warehouse
+    if not warehouse and invoice.branch:
+        try:
+            if frappe.get_meta("Branch").has_field("warehouse"):
+                warehouse = frappe.db.get_value("Branch", invoice.branch, "warehouse")
+        except Exception:
+            warehouse = None
+    if warehouse:
+        _check_stock(items, warehouse)
 
     invoice.items = []
     

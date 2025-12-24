@@ -81,6 +81,10 @@ website_route_rules = [
 # before_install = "ury.install.before_install"
 # after_install = "ury.install.after_install"
 
+# Request Hooks
+# -------------
+before_request = ["ury.ury.api.utils.ignore_csrf_for_kot_notification"]
+
 # Uninstallation
 # ------------
 
