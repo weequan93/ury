@@ -1,7 +1,6 @@
 import json
 
 import frappe
-from ury.ury_pos.api import getBranch
 
 
 # Load JSON data or return as is if it's already a Python dictionary
@@ -9,6 +8,22 @@ def load_json(data):
     if isinstance(data, str):
         return json.loads(data)
     return data
+
+
+def _resolve_kot_branch(invoice_id=None, restaurant_table=None, pos_profile_id=None):
+    if restaurant_table:
+        branch = frappe.db.get_value("URY Table", restaurant_table, "branch")
+        if branch:
+            return branch
+    if pos_profile_id:
+        branch = frappe.db.get_value("POS Profile", pos_profile_id, "branch")
+        if branch:
+            return branch
+    if invoice_id:
+        branch = frappe.db.get_value("POS Invoice", invoice_id, "branch")
+        if branch:
+            return branch
+    return None
 
 
 # Create a list of order items from a list of input items
@@ -58,7 +73,7 @@ def create_kot_doc(
             "order_no":order_number
         }
     )
-    branch = getBranch()
+    branch = _resolve_kot_branch(invoice_id, restaurant_table, pos_profile_id)
     if restaurant_table:
         room = frappe.db.get_value("URY Table", restaurant_table, "restaurant_room")
         restaurant = frappe.db.get_value("URY Table", restaurant_table, "restaurant")
@@ -290,7 +305,7 @@ def create_cancel_kot_doc(
         }
     )
 
-    branch = getBranch()
+    branch = _resolve_kot_branch(invoice_id, restaurant_table, pos_profile_id)
     if restaurant_table:
         room = frappe.db.get_value("URY Table", restaurant_table, "restaurant_room")
         restaurant = frappe.db.get_value("URY Table", restaurant_table, "restaurant")
