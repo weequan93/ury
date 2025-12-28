@@ -145,6 +145,8 @@ def process_items_for_kot(
         for item in kot_items:
             item_group = frappe.db.get_value("Item", item["item_code"], "item_group")
             item_code = item["item_code"]
+            if not frappe.db.get_value("Item", item_code, "is_stock_item"):
+                continue
             if item_group not in all_production_item_groups:
                 frappe.msgprint(
                     f"Item group '{item_group}' for item '{item_code}' is not in any production."

@@ -56,9 +56,58 @@ def _check_stock(items, warehouse):
 			qty = 0
 		if not code or qty <= 0:
 			continue
+		if not frappe.db.get_value("Item", code, "is_stock_item"):
+			continue
 		actual_qty = frappe.db.get_value("Bin", {"item_code": code, "warehouse": warehouse}, "actual_qty") or 0
 		if qty > float(actual_qty):
 			frappe.throw(_("Insufficient stock for item {0} in warehouse {1} (Requested: {2}, Available: {3})").format(code, warehouse, qty, actual_qty))
+
+
+def _get_zero_tax_map(invoice):
+	tax_accounts = []
+	if invoice.get("taxes"):
+		tax_accounts = [row.account_head for row in invoice.taxes if row.account_head]
+	elif invoice.get("taxes_and_charges"):
+		try:
+			template = frappe.get_cached_doc("Sales Taxes and Charges Template", invoice.taxes_and_charges)
+			tax_accounts = [row.account_head for row in template.taxes if row.account_head]
+		except Exception:
+			tax_accounts = []
+
+	if not tax_accounts:
+		return None
+	return {account: 0 for account in tax_accounts}
+
+
+def _is_wallet_topup_item(item_code):
+	if not item_code:
+		return False
+	if item_code == "WALLET-TOPUP":
+		return True
+	if frappe.db.has_column("Item", "custom_is_wallet_topup"):
+		return bool(frappe.db.get_value("Item", item_code, "custom_is_wallet_topup"))
+	return False
+
+
+def _only_wallet_topup_items(invoice):
+	items = [row for row in invoice.items if float(row.qty or 0) > 0]
+	if not items:
+		return False
+	return all(_is_wallet_topup_item(row.item_code or row.get("item")) for row in items)
+
+
+def _apply_wallet_topup_tax_exemption(invoice):
+	tax_map = _get_zero_tax_map(invoice)
+	if not tax_map:
+		return
+
+	tax_rate_json = frappe.as_json(tax_map)
+	for item in invoice.items:
+		item_code = item.get("item_code") or item.get("item")
+		if not item_code:
+			continue
+		if _is_wallet_topup_item(item_code):
+			item.item_tax_rate = tax_rate_json
 
 
 @frappe.whitelist()
@@ -342,6 +391,11 @@ def sync_order(
                         ),
                 ),
             )
+
+    _apply_wallet_topup_tax_exemption(invoice)
+    if _only_wallet_topup_items(invoice):
+        invoice.set("taxes_and_charges", None)
+        invoice.set("taxes", [])
 
     try:
         invoice.save()
@@ -628,6 +682,10 @@ def make_invoice(customer, payments, cashier, pos_profile,owner, additionalDisco
     invoice.customer = customer
     invoice.pos_profile = pos_profile
     invoice.additional_discount_percentage=additionalDiscount
+    _apply_wallet_topup_tax_exemption(invoice)
+    if _only_wallet_topup_items(invoice):
+        invoice.set("taxes_and_charges", None)
+        invoice.set("taxes", [])
     invoice.calculate_taxes_and_totals()
 
     for pay in invoice.payments:
